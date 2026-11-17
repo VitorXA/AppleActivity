@@ -1,23 +1,11 @@
 import SwiftUI
-import Notion
 
+// MARK: - ContentView
+// Tela raiz do app. Agora só mostra a BaseScreen.
+// (O token do Notion e a busca dos produtos ficam em NotionConfig / NotionService / BaseViewModel.)
 struct ContentView: View {
-    
-    let bearerToken = ProcessInfo.processInfo.environment["BEARER_TOKEN"]!
-    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-        .task {
-            let client = NotionClient(
-                bearerToken: bearerToken
-            )
-        }
+        BaseScreen()
     }
 }
 
