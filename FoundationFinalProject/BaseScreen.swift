@@ -1,30 +1,58 @@
-
 import SwiftUI
 
-// =====================================================================
-// BaseScreen — tela principal (Categorias) do app
-// Arquivo AUTOSSUFICIENTE: pode colar inteiro no seu arquivo do Xcode.
-// Se o nome da sua struct for outro (ex.: baseScreen), renomeie abaixo.
-// =====================================================================
+private let catalogBackground = Color(red: 246/255, green: 247/255, blue: 248/255)
+private let catalogPanel = Color(red: 231/255, green: 231/255, blue: 231/255)
+private let catalogInk = Color(red: 20/255, green: 22/255, blue: 23/255)
 
-// MARK: - 1. Modelo de categoria
-// `imageName` = nome da imagem dentro de Assets.xcassets (nil = espaço cinza).
-private struct BaseCategory: Identifiable, Hashable {
-    let id = UUID()
-    let name: String
-    let imageName: String?
+private enum CatalogRoute: Hashable {
+    case category(String), product(DailyProduct), seller(String)
 }
 
-// MARK: - 2. Tela principal
 struct BaseScreen: View {
-
-    // ----- DADOS (edite aqui) -----------------------------------------
-
-    /// Banners do carrossel cinza. Troque `nil` pelo nome da imagem, ex.: "banner_1".
     @State private var products: [DailyProduct] = []
     @State private var loading = true
     @State private var error: String?
     @State private var search = ""
+    @State private var selectedTab = 0
+    @State private var path: [CatalogRoute] = []
+    private let categories = ["Doces", "Salgados", "Bijuteria", "Eletrônicos", "Cultura Geek", "Outros"]
+    private let representative = ["Doces": "Cookie", "Salgados": "Coxinha", "Bijuteria": "Pulseira", "Eletrônicos": "Mouse USB", "Cultura Geek": "Botton", "Outros": "Brownie"]
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            GeometryReader { geometry in
+                Group {
+                    if selectedTab == 0 { home(width: geometry.size.width) }
+                    else { searchScreen }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(catalogBackground)
+                .overlay(alignment: .top) {
+                    if loading { ProgressView().padding(8).background(.regularMaterial, in: Capsule()) }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: CatalogRoute.self) { route in
+                Group {
+                    switch route {
+                    case .category(let category):
+                        overview(category)
+                    case .product(let product):
+                        CatalogProductDetail(product: product) { id in path.append(.seller(id)) }
+                    case .seller(let id):
+                        CatalogSellerDetail(id: id)
+                    }
+                }
+                .background(catalogBackground)
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+            }
+        }
+        .preferredColorScheme(.light)
+        .task { await load() }
+    }
+
     private func load() async {
         loading = true
         error = nil
@@ -33,187 +61,378 @@ struct BaseScreen: View {
         catch { self.error = error.localizedDescription }
     }
 
-    /// Categorias da grade. Troque `nil` pelo nome da imagem, ex.: "cat_doces".
-    private let categories: [BaseCategory] = [
-        BaseCategory(name: "Doces",        imageName: nil),   // TODO: "cat_doces"
-        BaseCategory(name: "Salgados",     imageName: nil),   // TODO: "cat_salgados"
-        BaseCategory(name: "Bijuteria",    imageName: nil),   // TODO: "cat_bijuteria"
-        BaseCategory(name: "Eletrônicos",  imageName: nil),   // TODO: "cat_eletronicos"
-        BaseCategory(name: "Cultura Geek", imageName: nil),   // TODO: "cat_geek"
-        BaseCategory(name: "Outros",       imageName: nil),   // TODO: "cat_outros"
-    ]
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            tab(0, title: "Produtos")
+            tab(1, title: "Pesquisar")
+        }
+        .padding(3)
+        .frame(width: 184, height: 61)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.black.opacity(0.14), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 5)
+    }
 
-    /// Grade com 2 colunas, igual ao Figma.
-    private let columns = [GridItem(.flexible(), spacing: 12),
-                           GridItem(.flexible(), spacing: 12)]
+    private func tab(_ index: Int, title: String) -> some View {
+        Button {
+            path.removeAll()
+            selectedTab = index
+        } label: {
+            VStack(spacing: 3) {
+                if index == 0 { CatalogCookieIcon().frame(width: 25, height: 25) }
+                else { Image(systemName: "magnifyingglass").font(.system(size: 25, weight: .medium)) }
+                Text(title).font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(selectedTab == 1 && index == 1 ? Color.blue : catalogInk)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(selectedTab == index ? Color.black.opacity(0.08) : .clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selectedTab == index ? .isSelected : [])
+    }
 
-    // ----- LAYOUT -----------------------------------------------------
+    private func home(width: CGFloat) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Bem-vindo!")
+                    .font(.system(size: 22, weight: .bold))
+                    .padding(.horizontal, 21)
+                    .padding(.top, 20)
+                    .padding(.bottom, 29)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 19) {
+                        ForEach(bannerProducts) { product in
+                            Button { path.append(.product(product)) } label: {
+                                CatalogRemoteImage(url: product.imageURL)
+                                    .frame(width: width * 0.86, height: width * 0.40)
+                                    .clipShape(RoundedRectangle(cornerRadius: 28))
+                            }.buttonStyle(.plain)
+                        }
+                        if bannerProducts.isEmpty {
+                            CatalogRemoteImage(url: nil)
+                                .frame(width: width * 0.86, height: width * 0.40)
+                                .clipShape(RoundedRectangle(cornerRadius: 28))
+                        }
+                    }.padding(.horizontal, 21)
+                }
+                Text("Categorias")
+                    .font(.system(size: 28, weight: .bold))
+                    .padding(.horizontal, 21)
+                    .padding(.top, 37)
+                    .padding(.bottom, 20)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 13), GridItem(.flexible(), spacing: 13)], spacing: 17) {
+                    ForEach(categories, id: \.self) { category in
+                        Button { path.append(.category(category)) } label: {
+                            CatalogTile(title: category, url: categoryImage(category), height: width * 0.22)
+                        }.buttonStyle(.plain)
+                    }
+                }.padding(.horizontal, 18)
+                if let error {
+                    Text(error).font(.caption).padding()
+                    Button("Tentar novamente") { Task { await load() } }.padding(.horizontal)
+                }
+            }
+            .padding(.bottom, 8)
+        }.refreshable { await load() }
+        .foregroundStyle(catalogInk)
+    }
 
-    var body: some View {
-        TabView {
+    private var bannerProducts: [DailyProduct] {
+        let preferred = ["Bolo de pote", "Brownie", "Cookie"]
+        var result: [DailyProduct] = []
+        for name in preferred {
+            if let p = products.first(where: { $0.name == name && $0.imageURL != nil }) { result.append(p) }
+        }
+        return result.isEmpty ? Array(products.filter { $0.imageURL != nil }.prefix(3)) : result
+    }
 
-            // ABA 1: Produtos (esta tela)
-            NavigationStack {
+    private func categoryImage(_ category: String) -> URL? {
+        let group = products.filter { $0.category == category && $0.imageURL != nil }
+        return group.first { $0.name == representative[category] }?.imageURL ?? group.first?.imageURL
+    }
+
+    private func overview(_ category: String) -> some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text(category)
+                        .font(.system(size: 34, weight: .bold))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 22)
+                    ForEach(Array(sections(category).enumerated()), id: \.offset) { _, section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(section.title)
+                                .font(.system(size: 22, weight: .bold))
+                                .padding(.horizontal, 16)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(alignment: .top, spacing: 13) {
+                                    ForEach(section.items) { p in
+                                        Button { path.append(.product(p)) } label: {
+                                            CatalogTile(title: p.name, url: p.imageURL, height: geometry.size.width * 0.22)
+                                                .frame(width: geometry.size.width * 0.435)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }.padding(.horizontal, 16)
+                            }
+                        }
+                    }
+                }.padding(.bottom, 12)
+            }
+            .foregroundStyle(catalogInk)
+            .overlay(alignment: .topTrailing) {
+                Button { if !path.isEmpty { path.removeLast() } } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .medium))
+                        .padding(10).background(.ultraThinMaterial, in: Circle())
+                }.buttonStyle(.plain).padding(.trailing, 16).padding(.top, 24)
+                    .accessibilityLabel("Voltar")
+            }
+        }
+    }
+
+    private struct SectionData {
+        let title: String
+        let items: [DailyProduct]
+    }
+
+    private func sections(_ category: String) -> [SectionData] {
+        let all = products.filter { $0.category == category }
+        if category == "Doces" {
+            let groups = [
+                ("Destaques", ["Cookie", "Brownie"]),
+                ("Vai uma sobremesa?", ["Sorvete", "Barra de cereal", "Bolo de pote", "Brigadeiro", "Beijinho", "Trufa"]),
+                ("Ou algo para matar a fome?", ["Pão doce", "Torta", "Palha italiana", "Sequilho"])
+            ]
+            var used = Set<String>()
+            var result = groups.map { title, names in
+                let items = names.flatMap { name in all.filter { $0.name == name } }
+                used.formUnion(items.map(\.id))
+                return SectionData(title: title, items: items)
+            }.filter { !$0.items.isEmpty }
+            let rest = all.filter { !used.contains($0.id) }
+            if !rest.isEmpty { result.append(SectionData(title: "Outros produtos", items: rest)) }
+            return result
+        }
+        let featured = Array(all.prefix(4))
+        let remaining = Array(all.dropFirst(4))
+        return [SectionData(title: "Destaques", items: featured), SectionData(title: "Mais produtos", items: remaining)].filter { !$0.items.isEmpty }
+    }
+
+    private var searchScreen: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 12) {
+                HStack(spacing: 7) {
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 19))
+                        TextField("Search", text: $search)
+                            .font(.system(size: 17))
+                            .textInputAutocapitalization(.never)
+                        if !search.isEmpty {
+                            Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 15)
+                    .frame(height: 47)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.black.opacity(0.14), lineWidth: 0.5))
+                    Button {
+                        search = ""
+                        selectedTab = 0
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 23, weight: .light))
+                            .frame(width: 47, height: 47)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(Color.black.opacity(0.14), lineWidth: 0.5))
+                    }.buttonStyle(.plain)
+                }.padding(.horizontal, 8).padding(.top, 20)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-
-                        // Saudação
-                        Text("Bem-vindo!")
-                            .font(.headline)
-
-                        // Carrossel de banners (rola para o lado)
-                        bannerCarousel
-                        if loading { ProgressView() }
-                        if let error { Text(error).font(.caption); Button("Tentar novamente") { Task { await load() } } }
-
-                        // Título da seção
-                        Text("Categorias")
-                            .font(.title3.bold())
-
-                        // Grade de categorias
-                        categoryGrid
-                    }
-                    .padding(16)
-                }
-                .background(Color(red: 0.97, green: 0.97, blue: 0.98)) // fundo do Figma
-                .navigationBarTitleDisplayMode(.inline)
-
-                // Quando a tela de Overview de Produtos existir, ligue aqui:
-                // .navigationDestination(for: BaseCategory.self) { ProductsOverviewView(...) }
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 13), GridItem(.flexible(), spacing: 13)], spacing: 21) {
+                        ForEach(products.filter {
+                            search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) ||
+                            $0.category.localizedCaseInsensitiveContains(search) ||
+                            $0.description.localizedCaseInsensitiveContains(search)
+                        }) { p in
+                            Button { path.append(.product(p)) } label: {
+                                CatalogTile(title: p.category, url: p.imageURL, height: geometry.size.width * 0.22)
+                            }.buttonStyle(.plain)
+                            .accessibilityLabel(p.name + ", " + p.category)
+                        }
+                    }.padding(.horizontal, 18).padding(.bottom, 12)
+                }.scrollDismissesKeyboard(.interactively)
             }
-            .tabItem { Label("Produtos", systemImage: "birthday.cake") } // TODO: ícone do cookie
-
-            // ABA 2: Pesquisar (troque pela tela de busca do seu colega)
-            NavigationStack {
-                List(products.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) || $0.category.localizedCaseInsensitiveContains(search) }) { product in
-                    NavigationLink { CatalogProductDetail(product: product) } label: { CatalogProductRow(product: product) }
-                }
-                .searchable(text: $search)
-                .navigationTitle("Pesquisar")
-            }
-            .tabItem { Label("Pesquisar", systemImage: "magnifyingglass") }
-        }
-        .task { await load() }
-    }
-
-    // MARK: - Carrossel de banners
-    private var bannerCarousel: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(Array(products.prefix(3))) { product in
-                    NavigationLink { CatalogProductDetail(product: product) } label: {
-                        CatalogRemoteImage(url: product.imageURL)
-                            .frame(width: 300, height: 140)
-                            .clipShape(RoundedRectangle(cornerRadius: 20))
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Grade de categorias
-    private var categoryGrid: some View {
-        LazyVGrid(columns: columns, spacing: 14) {
-            ForEach(categories) { category in
-                // NavigationLink(value: category) { ... }  ← use quando houver a próxima tela
-                NavigationLink {
-                    List(products.filter { $0.category == category.name }) { product in
-                        NavigationLink { CatalogProductDetail(product: product) } label: { CatalogProductRow(product: product) }
-                    }.navigationTitle(category.name)
-                } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    CatalogRemoteImage(url: products.first { $0.category == category.name }?.imageURL)         // espaço da imagem da categoria
-                        .frame(height: 80)
-                        .frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                    Text(category.name)
-                        .font(.caption.weight(.semibold))
-                }
-                }.buttonStyle(.plain)
-            }
-        }
+        }.foregroundStyle(catalogInk)
     }
 }
 
-// MARK: - 3. Espaço para imagem
-// Mostra a imagem do Assets pelo nome; se não existir, mostra um quadrado cinza.
-private struct BaseImage: View {
-    let name: String?
-
+private struct CatalogTile: View {
+    let title: String
+    let url: URL?
+    let height: CGFloat
     var body: some View {
-        if let name, UIImage(named: name) != nil {
-            Image(name).resizable().scaledToFill()
-        } else {
-            ZStack {
-                Color.gray.opacity(0.18)
-                Image(systemName: "photo").foregroundStyle(.secondary)
-            }
-        }
+        VStack(alignment: .leading, spacing: 8) {
+            CatalogRemoteImage(url: url)
+                .frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            Text(title)
+                .font(.system(size: 17, weight: .semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 15)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
-}
-
-// MARK: - Pré-visualização no Xcode (Canvas)
-#Preview {
-    BaseScreen()
 }
 
 private struct CatalogRemoteImage: View {
     let url: URL?
     var body: some View {
-        AsyncImage(url: url) { phase in
-            if let image = phase.image { image.resizable().scaledToFill() }
-            else { Color.gray.opacity(0.18).overlay(Image(systemName: "photo").foregroundStyle(.secondary)) }
-        }.clipped()
+        GeometryReader { geo in
+            AsyncImage(url: url) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height).clipped()
+                } else {
+                    catalogPanel.overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+                }
+            }.frame(width: geo.size.width, height: geo.size.height).clipped()
+        }
     }
 }
-private struct CatalogProductRow: View {
-    let product: DailyProduct
+
+private struct CatalogCookieIcon: View {
     var body: some View {
-        HStack {
-            CatalogRemoteImage(url: product.imageURL).frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading) {
-                Text(product.name).font(.headline)
-                Text(product.description).font(.caption)
-                if let price = product.price { Text(price, format: .currency(code: "BRL")) }
+        Canvas { context, size in
+            let w = size.width, h = size.height
+            var outline = Path()
+            outline.move(to: CGPoint(x: w*0.61, y: h*0.06))
+            outline.addArc(center: CGPoint(x: w*0.48, y: h*0.51), radius: w*0.45,
+                           startAngle: .degrees(-73), endAngle: .degrees(8), clockwise: true)
+            outline.addQuadCurve(to: CGPoint(x: w*0.61,y: h*0.06), control: CGPoint(x: w*0.52,y: h*0.50))
+            outline.closeSubpath()
+            context.fill(outline, with: .color(.black))
+            for (x,y,r) in [(0.30,0.33,0.06),(0.20,0.57,0.045),(0.43,0.57,0.06),(0.56,0.79,0.045),(0.39,0.85,0.04)] {
+                context.fill(Path(ellipseIn: CGRect(x:w*(x-r), y:h*(y-r), width:w*r*2,height:h*r*2)), with:.color(catalogBackground))
+            }
+            for (x,y,r) in [(0.78,0.10,0.035),(0.88,0.22,0.045),(0.69,0.25,0.025)] {
+                context.fill(Path(ellipseIn: CGRect(x:w*(x-r), y:h*(y-r), width:w*r*2,height:h*r*2)), with:.color(.black))
             }
         }
     }
 }
-private struct CatalogProductDetail: View {
-    let product: DailyProduct
+
+private struct CatalogInfoPanel: View {
+    let title: String
+    let rows: [(String, String)]
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                CatalogRemoteImage(url: product.imageURL).frame(height: 260).clipShape(RoundedRectangle(cornerRadius: 14))
-                Text(product.name).font(.title.bold())
-                if let price = product.price { Text(price, format: .currency(code: "BRL")).font(.title2) }
-                Text(product.description)
-                if let id = product.sellerID {
-                    NavigationLink("Ver vendedor") { CatalogSellerDetail(id: id) }
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.gray.opacity(0.55))
+                .padding(.horizontal, 8)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(row.0).font(.system(size: 21, weight: .bold))
+                        Spacer(minLength: 4)
+                        Text(row.1)
+                            .font(.system(size: 21, weight: .bold))
+                            .foregroundStyle(Color.gray.opacity(0.65))
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(3)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 13)
+                    if i < rows.count - 1 { Divider() }
                 }
-            }.padding()
-        }.navigationTitle(product.name)
+            }
+            .background(catalogPanel, in: RoundedRectangle(cornerRadius: 17))
+        }
+        .foregroundStyle(.black)
     }
 }
+
+private struct CatalogHero: View {
+    let url: URL?
+    let height: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        CatalogRemoteImage(url: url)
+            .frame(height: height)
+            .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 43, bottomTrailingRadius: 43))
+            .overlay(alignment: .topLeading) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 23, weight: .medium))
+                        .foregroundStyle(.black)
+                        .frame(width: 43, height: 43)
+                        .background(.regularMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 0.5))
+                }.buttonStyle(.plain).padding(.leading, 16).padding(.top, 12)
+                    .accessibilityLabel("Voltar")
+            }
+    }
+}
+
+private struct CatalogProductDetail: View {
+    let product: DailyProduct
+    let openSeller: (String) -> Void
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    CatalogHero(url: product.imageURL, height: geo.size.width * 0.88)
+                    CatalogInfoPanel(title: "Detalhes do Produto:", rows: [
+                        ("Produto:", product.name),
+                        ("Descrição:", product.description),
+                        ("Valor:", product.price.map { $0.formatted(.currency(code: "BRL").locale(Locale(identifier: "pt_BR"))) } ?? "—")
+                    ])
+                    .padding(.horizontal, 16)
+                    .padding(.top, 40)
+                    Button {
+                        if let id = product.sellerID { openSeller(id) }
+                    } label: {
+                        Text("Informações do vendedor")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(.gray)
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: 58)
+                            .background(catalogPanel, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(product.sellerID == nil)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 70)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+    }
+}
+
 private struct CatalogSellerDetail: View {
     let id: String
     @State private var seller: CatalogSeller?
     @State private var error: String?
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let seller {
-                    CatalogRemoteImage(url: seller.imageURL).frame(width: 120, height: 120).clipShape(Circle())
-                    Text(seller.name).font(.title.bold())
-                    Text(seller.course)
-                    ForEach(seller.contacts) { contact in
-                        Text(contact.type).font(.headline)
-                        Text(contact.value)
-                    }
-                } else if let error { Text(error) }
-                else { ProgressView() }
-            }.padding()
-        }.navigationTitle("Vendedor").task {
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    CatalogHero(url: seller?.imageURL, height: geo.size.width * 0.88)
+                    if let seller {
+                        CatalogInfoPanel(title: "Detalhes do Vendedor:", rows: [("Nome:", seller.name), ("Curso:", seller.course)])
+                            .padding(.horizontal, 16).padding(.top, 40)
+                        CatalogInfoPanel(title: "Contatos do Vendedor:", rows: seller.contacts.sorted {
+                            let a = $0.type.lowercased().contains("whatsapp")
+                            let b = $1.type.lowercased().contains("whatsapp")
+                            return a == b ? $0.type < $1.type : a
+                        }.map { ($0.type + ":", $0.value) })
+                            .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 12)
+                    } else if let error { Text(error).padding() }
+                    else { ProgressView().padding() }
+                }
+            }
+        }.task {
             do {
                 seller = try await NotionService().fetchSeller(id: id)
                 if seller == nil { error = "Vendedor não encontrado." }
@@ -221,3 +440,5 @@ private struct CatalogSellerDetail: View {
         }
     }
 }
+
+#Preview { BaseScreen() }
