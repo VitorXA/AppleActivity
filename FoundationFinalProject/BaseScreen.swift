@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private let catalogBackground = Color(red: 246/255, green: 247/255, blue: 248/255)
 private let catalogPanel = Color(red: 231/255, green: 231/255, blue: 231/255)
@@ -323,6 +324,7 @@ private struct CatalogCookieIcon: View {
 private struct CatalogInfoPanel: View {
     let title: String
     let rows: [(String, String)]
+    var onCopy: ((String, String) -> Void)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
@@ -331,18 +333,39 @@ private struct CatalogInfoPanel: View {
                 .padding(.horizontal, 8)
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(row.0).font(.system(size: 21, weight: .bold))
-                        Spacer(minLength: 4)
-                        Text(row.1)
-                            .font(.system(size: 21, weight: .bold))
-                            .foregroundStyle(Color.gray.opacity(0.65))
-                            .multilineTextAlignment(.trailing)
-                            .lineLimit(3)
-                            .minimumScaleFactor(0.7)
+                    if let onCopy, !row.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button { onCopy(row.0, row.1) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(row.0).font(.system(size: 21, weight: .bold))
+                                Spacer(minLength: 4)
+                                Text(row.1)
+                                    .font(.system(size: 21, weight: .bold))
+                                    .foregroundStyle(Color.gray.opacity(0.65))
+                                    .multilineTextAlignment(.trailing)
+                                    .lineLimit(3)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 13)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(row.0 + " " + row.1)
+                        .accessibilityHint("Copia o contato")
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(row.0).font(.system(size: 21, weight: .bold))
+                            Spacer(minLength: 4)
+                            Text(row.1)
+                                .font(.system(size: 21, weight: .bold))
+                                .foregroundStyle(Color.gray.opacity(0.65))
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(3)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 13)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 13)
                     if i < rows.count - 1 { Divider() }
                 }
             }
@@ -414,6 +437,16 @@ private struct CatalogSellerDetail: View {
     let id: String
     @State private var seller: CatalogSeller?
     @State private var error: String?
+    @State private var copiedMessage: String?
+    @State private var copyEvent = UUID()
+
+    private func copyContact(_ label: String, _ value: String) {
+        UIPasteboard.general.string = value
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        let name = label.trimmingCharacters(in: CharacterSet(charactersIn: ": "))
+        withAnimation(.easeInOut(duration: 0.2)) { copiedMessage = "\(name) copiado!" }
+        copyEvent = UUID()
+    }
     var body: some View {
         GeometryReader { geo in
             ScrollView {
@@ -426,13 +459,35 @@ private struct CatalogSellerDetail: View {
                             let a = $0.type.lowercased().contains("whatsapp")
                             let b = $1.type.lowercased().contains("whatsapp")
                             return a == b ? $0.type < $1.type : a
-                        }.map { ($0.type + ":", $0.value) })
+                        }.map { ($0.type + ":", $0.value) }, onCopy: copyContact)
                             .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 12)
                     } else if let error { Text(error).padding() }
                     else { ProgressView().padding() }
                 }
             }
-        }.task {
+        }
+        .overlay(alignment: .bottom) {
+            if let copiedMessage {
+                Label(copiedMessage, systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(catalogInk)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+                    .padding(.bottom, 12)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .allowsHitTesting(false)
+            }
+        }
+        .task(id: copyEvent) {
+            guard copiedMessage != nil else { return }
+            do { try await Task.sleep(nanoseconds: 1_800_000_000) }
+            catch { return }
+            withAnimation(.easeInOut(duration: 0.2)) { copiedMessage = nil }
+        }
+        .task {
             do {
                 seller = try await NotionService().fetchSeller(id: id)
                 if seller == nil { error = "Vendedor não encontrado." }
