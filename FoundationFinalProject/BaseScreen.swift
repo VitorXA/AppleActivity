@@ -95,23 +95,24 @@ struct BaseScreen: View {
     }
 
     private func home(width: CGFloat) -> some View {
-        ScrollView {
+        let cardWidth = max(0, (width - 36 - 13) / 2)
+        return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Bem-vindo!")
                     .font(.system(size: 22, weight: .bold))
                     .padding(.horizontal, 21)
-                    .padding(.top, 20)
-                    .padding(.bottom, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 10)
                 Text("Novidades")
                     .font(.system(size: 28, weight: .bold))
                     .padding(.horizontal, 21)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 10)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 19) {
                         ForEach(bannerProducts) { product in
                             Button { path.append(.product(product)) } label: {
                                 CatalogRemoteImage(url: product.imageURL)
-                                    .frame(width: width * 0.86, height: width * 0.40)
+                                    .frame(width: width * 0.86, height: width * 0.36)
                                     .overlay(alignment: .bottomLeading) {
                                         LinearGradient(
                                             colors: [.clear, .black.opacity(0.75)],
@@ -135,7 +136,7 @@ struct BaseScreen: View {
                         }
                         if bannerProducts.isEmpty {
                             CatalogRemoteImage(url: nil)
-                                .frame(width: width * 0.86, height: width * 0.40)
+                                .frame(width: width * 0.86, height: width * 0.36)
                                 .clipShape(RoundedRectangle(cornerRadius: 28))
                         }
                     }.padding(.horizontal, 21)
@@ -143,12 +144,25 @@ struct BaseScreen: View {
                 Text("Categorias")
                     .font(.system(size: 28, weight: .bold))
                     .padding(.horizontal, 21)
-                    .padding(.top, 37)
-                    .padding(.bottom, 20)
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 13), GridItem(.flexible(), spacing: 13)], spacing: 17) {
+                    .padding(.top, 24)
+                    .padding(.bottom, 14)
+                LazyVGrid(columns: [GridItem(.fixed(cardWidth), spacing: 13), GridItem(.fixed(cardWidth), spacing: 13)], spacing: 13) {
                     ForEach(categories, id: \.self) { category in
                         Button { path.append(.category(category)) } label: {
-                            CatalogTile(title: category, url: categoryImage(category), height: width * 0.22)
+                            VStack(alignment: .leading, spacing: 6) {
+                                CatalogRemoteImage(url: categoryImage(category))
+                                    .frame(width: cardWidth, height: width * 0.205)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                Text(category)
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.85)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(minHeight: 23, alignment: .topLeading)
+                                    .padding(.horizontal, 12)
+                            }
+                            .frame(width: cardWidth, alignment: .leading)
+                            .contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
                 }.padding(.horizontal, 18)
@@ -157,8 +171,10 @@ struct BaseScreen: View {
                     Button("Tentar novamente") { Task { await load() } }.padding(.horizontal)
                 }
             }
-            .padding(.bottom, 8)
-        }.refreshable { await load() }
+            .padding(.bottom, 24)
+        }
+        .scrollIndicators(.hidden)
+        .refreshable { await load() }
         .foregroundStyle(catalogInk)
     }
 
