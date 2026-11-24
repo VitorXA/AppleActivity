@@ -1,118 +1,140 @@
 import Foundation
 
-// MARK: - Modelo
-// Produto do dia, já "limpo" (sem a bagunça do JSON do Notion). É o que a tela usa.
 struct DailyProduct: Identifiable, Hashable {
-    let id: String          // id da página no Notion
+    let id: String
     let name: String
     let category: String
-    let imageURL: URL?      // nil = mostra espaço cinza
+    let imageURL: URL?
+    var price: Double? = nil
+    var description: String = ""
+    var sellerID: String? = nil
 }
 
-// MARK: - Interface
-// A tela só conhece este protocolo. Trocar Mock por Notion = trocar 1 linha em BaseScreen.
+struct CatalogSeller: Identifiable {
+    let id: String
+    let name: String
+    let course: String
+    let imageURL: URL?
+    let contacts: [CatalogContact]
+}
+
+struct CatalogContact: Identifiable {
+    let id: String
+    let type: String
+    let value: String
+}
+
 protocol DailyProductsProviding {
     func fetchDailyProducts() async throws -> [DailyProduct]
 }
 
-// MARK: - Versão de teste (sem internet / sem Notion)
 struct MockDailyProductsService: DailyProductsProviding {
     func fetchDailyProducts() async throws -> [DailyProduct] {
-        try await Task.sleep(nanoseconds: 600_000_000)   // simula carregamento
-        return (1...3).map {
-            DailyProduct(id: "mock\($0)", name: "Produto do dia \($0)", category: "Doces", imageURL: nil)
-        }
+        [DailyProduct(id: "demo", name: "Brownie", category: "Doces", imageURL: nil, price: 7, description: "Sabor Ninho")]
     }
 }
 
-// MARK: - Versão real: Notion
 struct NotionService: DailyProductsProviding {
-
     enum NotionError: LocalizedError {
-        case badStatus(Int)
-        case missingConfig
+        case missingConfig, badStatus(Int), invalidPagination
         var errorDescription: String? {
             switch self {
-            case .missingConfig: return "Faltam BEARER_TOKEN ou NOTION_DATABASE_ID no Scheme do Xcode."
-            case .badStatus(let c): return "Não foi possível carregar (erro \(c)). Verifique token e ID do banco."
+            case .missingConfig: return "Configure BEARER_TOKEN no Scheme local do Xcode."
+            case .badStatus(let code): return "Falha na consulta ao Notion (HTTP \(code))."
+            case .invalidPagination: return "Resposta de paginação inválida."
             }
         }
     }
 
-    func fetchDailyProducts() async throws -> [DailyProduct] {
-        guard !NotionConfig.token.isEmpty, !NotionConfig.databaseID.isEmpty else { throw NotionError.missingConfig }
-
-        // 1) Monta a requisição: POST /databases/{id}/query
-        let url = URL(string: "https://api.notion.com/v1/databases/\(NotionConfig.databaseID)/query")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(NotionConfig.token)", forHTTPHeaderField: "Authorization")
-        request.setValue(NotionConfig.apiVersion, forHTTPHeaderField: "Notion-Version")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        // 2) Filtro "do dia": só linhas cuja coluna Data == hoje.
-        //    (Alternativa: usar uma coluna checkbox "Produto do dia" -> {"checkbox": {"equals": true}})
-        let body: [String: Any] = [
-            "page_size": 10,
-            "filter": ["property": NotionConfig.dateProp, "date": ["equals": Self.todayString]]
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        // 3) Chama a API e confere o status
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else { throw NotionError.badStatus(status) }
-
-        // 4) Converte o JSON do Notion em [DailyProduct]
-        let decoded = try JSONDecoder().decode(NotionResponse.self, from: data)
-        return decoded.results.map { page in
-            let p = page.properties
-            let image = p[NotionConfig.imageProp]
-            // Imagem pode vir de "Arquivos e mídia" (upload ou link) ou de uma coluna URL.
-            let urlString = image?.files?.first?.file?.url
-                         ?? image?.files?.first?.external?.url
-                         ?? image?.url
-            return DailyProduct(
-                id: page.id,
-                name: p[NotionConfig.nameProp]?.title?.first?.plainText ?? "Sem nome",
-                category: p[NotionConfig.categoryProp]?.select?.name ?? "",
-                imageURL: urlString.flatMap(URL.init(string:))
-            )
-        }
+    private func query(_ source: String, filter: [String: Any]? = nil) async throws -> [NotionPage] {
+        guard !NotionConfig.token.isEmpty else { throw NotionError.missingConfig }
+        let url = URL(string: "https://api.notion.com/v1/data_sources/\(source)/query")!
+        var pages: [NotionPage] = []
+        var cursor: String?
+        repeat {
+            var body: [String: Any] = ["page_size": 100]
+            if let cursor { body["start_cursor"] = cursor }
+            if let filter { body["filter"] = filter }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(NotionConfig.token)", forHTTPHeaderField: "Authorization")
+            request.setValue(NotionConfig.apiVersion, forHTTPHeaderField: "Notion-Version")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else { throw NotionError.badStatus(status) }
+            let decoded = try JSONDecoder().decode(NotionResponse.self, from: data)
+            pages += decoded.results
+            if decoded.has_more && (decoded.next_cursor == nil || decoded.next_cursor == cursor) {
+                throw NotionError.invalidPagination
+            }
+            cursor = decoded.has_more ? decoded.next_cursor : nil
+        } while cursor != nil
+        return pages
     }
 
-    /// Data de hoje no formato do Notion (yyyy-MM-dd), no fuso do aparelho.
-    private static var todayString: String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = .current
-        return f.string(from: Date())
+    func fetchDailyProducts() async throws -> [DailyProduct] {
+        let products = try await query(NotionConfig.databaseID)
+        let images = try await query(NotionConfig.imagesID)
+        var urls: [String: URL] = [:]
+        for image in images {
+            if let url = image.properties["image"]?.imageURL {
+                for relation in image.properties["product_id"]?.relation ?? [] {
+                    if urls[relation.id] == nil { urls[relation.id] = url }
+                }
+            }
+        }
+        return products.compactMap { page in
+            let p = page.properties
+            let name = (p["product"]?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            return DailyProduct(id: page.id, name: name, category: p["category"]?.text ?? "",
+                                imageURL: urls[page.id], price: p["price"]?.number,
+                                description: p["description"]?.text ?? "",
+                                sellerID: p["seller_id"]?.relation?.first?.id)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func fetchSeller(id: String) async throws -> CatalogSeller? {
+        let sellers = try await query(NotionConfig.sellersID)
+        guard let seller = sellers.first(where: { $0.id == id }) else { return nil }
+        let filter: [String: Any] = ["property": "seller_id", "relation": ["contains": id]]
+        let images = try await query(NotionConfig.sellersImagesID, filter: filter)
+        let contacts = try await query(NotionConfig.contactsID, filter: filter)
+        return CatalogSeller(id: id, name: seller.properties["Nome"]?.text ?? "",
+            course: seller.properties["course"]?.text ?? "",
+            imageURL: images.compactMap { $0.properties["image"]?.imageURL }.first,
+            contacts: contacts.map { CatalogContact(id: $0.id,
+                type: $0.properties["type"]?.text ?? "",
+                value: $0.properties["contact"]?.text ?? "") })
     }
 }
 
-// MARK: - Formato do JSON do Notion (só o que precisamos)
-// Cada propriedade do Notion tem um tipo diferente; deixamos tudo opcional e lemos o que existir.
-private struct NotionResponse: Decodable { let results: [NotionPage] }
-
+private struct NotionResponse: Decodable {
+    let results: [NotionPage]
+    let has_more: Bool
+    let next_cursor: String?
+}
 private struct NotionPage: Decodable {
     let id: String
     let properties: [String: NotionProperty]
 }
-
 private struct NotionProperty: Decodable {
     let title: [RichText]?
-    let select: Select?
+    let rich_text: [RichText]?
+    let number: Double?
+    let relation: [Relation]?
     let files: [NotionFile]?
-    let url: String?
-
-    struct RichText: Decodable {
-        let plainText: String
-        enum CodingKeys: String, CodingKey { case plainText = "plain_text" }
+    var text: String { (title ?? rich_text ?? []).map(\.plain_text).joined() }
+    var imageURL: URL? {
+        (files?.first?.file?.url ?? files?.first?.external?.url).flatMap { URL(string: $0) }
     }
-    struct Select: Decodable { let name: String }
+    struct RichText: Decodable { let plain_text: String }
+    struct Relation: Decodable { let id: String }
     struct NotionFile: Decodable {
-        let file: Link?        // arquivo enviado ao Notion (link EXPIRA em ~1h)
-        let external: Link?    // link externo (estável)
+        let file: Link?
+        let external: Link?
         struct Link: Decodable { let url: String }
     }
 }
