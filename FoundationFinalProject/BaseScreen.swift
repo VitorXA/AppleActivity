@@ -101,13 +101,35 @@ struct BaseScreen: View {
                     .font(.system(size: 22, weight: .bold))
                     .padding(.horizontal, 21)
                     .padding(.top, 20)
-                    .padding(.bottom, 29)
+                    .padding(.bottom, 16)
+                Text("Novidades")
+                    .font(.system(size: 28, weight: .bold))
+                    .padding(.horizontal, 21)
+                    .padding(.bottom, 12)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 19) {
                         ForEach(bannerProducts) { product in
                             Button { path.append(.product(product)) } label: {
                                 CatalogRemoteImage(url: product.imageURL)
                                     .frame(width: width * 0.86, height: width * 0.40)
+                                    .overlay(alignment: .bottomLeading) {
+                                        LinearGradient(
+                                            colors: [.clear, .black.opacity(0.75)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                        .allowsHitTesting(false)
+                                        .overlay(alignment: .bottomLeading) {
+                                            Text(product.name)
+                                                .font(.system(size: 21, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .lineLimit(2)
+                                                .minimumScaleFactor(0.8)
+                                                .multilineTextAlignment(.leading)
+                                                .padding(.horizontal, 17)
+                                                .padding(.bottom, 15)
+                                        }
+                                    }
                                     .clipShape(RoundedRectangle(cornerRadius: 28))
                             }.buttonStyle(.plain)
                         }
@@ -256,7 +278,7 @@ struct BaseScreen: View {
                             $0.description.localizedCaseInsensitiveContains(search)
                         }) { p in
                             Button { path.append(.product(p)) } label: {
-                                CatalogTile(title: p.category, url: p.imageURL, height: geometry.size.width * 0.22)
+                                CatalogTile(title: p.name, url: p.imageURL, height: geometry.size.width * 0.22)
                             }.buttonStyle(.plain)
                             .accessibilityLabel(p.name + ", " + p.category)
                         }
